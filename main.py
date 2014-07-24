@@ -109,7 +109,7 @@ class MainTemplate(QWidget):
     def __init__(self):
 	super(MainTemplate, self).__init__()
 	self.setFixedSize(800, 600)
-	self.setWindowTitle('Important Files Finder')
+	self.setWindowTitle('File Dustman')
 	self.put_layout()
 	self.allfiles_btn = QRadioButton('All', self)
 	
