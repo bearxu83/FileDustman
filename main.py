@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-#bug:
+#bug: Repeated File
+#feature: Add Copy To, Successful Tip, Debug Sys
+#study: Command Pattern. ThreadWorker Pattern
 from __future__ import unicode_literals
 from PySide.QtCore import *
 from PySide.QtGui import *
@@ -12,6 +14,7 @@ import time
 class ThreadFileMover(QThread):
     finished = Signal()
     one_moved = Signal()
+    one_failed = Signal(object)
     def __init__(self, items):
 	QThread.__init__(self)
 	self.items = items
@@ -19,9 +22,11 @@ class ThreadFileMover(QThread):
 
     def run(self):
 	for item in self.items:
-	    print self.des
-	    shutil.move(item, self.des)
-	    self.one_moved.emit()
+	    try:
+		shutil.move(item, self.des)
+		self.one_moved.emit()
+	    except shutil.Error as e:
+		self.one_failed.emit(e)
 	self.finished.emit()
 
 class FoundFile(QObject):
@@ -94,8 +99,10 @@ class FoundFile(QObject):
     def find_onedrive():
 	if TESTING:
 	    return "D:\\"
-	if os.path.expanduser("~\\SkyDrive"):
+	if os.path.isdir(os.path.expanduser("~\\SkyDrive")):
 	    return os.path.expanduser("~\\SkyDrive")
+	elif os.path.isdir(os.path.expanduser("~\\OneDrive")):
+	    return os.path.expanduser("~\\OneDrive")
 		    
 class MainTemplate(QWidget):
     
@@ -116,7 +123,7 @@ class MainTemplate(QWidget):
 	self.file_filter_gp.addButton(self.doc_btn)
 	self.file_filter_gp.addButton(self.xls_btn)
 	self.set_radio_enabled(False)
-	self.search_btn = QPushButton('Search Files...', self)
+	self.search_btn = QPushButton('   Search Files...   ', self)
 	self.list_box = QListWidget(self)
 	#~ self.list_box.setSelectionMode(QAbstractItemView.ExtendedSelection)
 	self.file_label = QLabel(self)
@@ -124,16 +131,32 @@ class MainTemplate(QWidget):
 	self.dropboxfolder_btn = QPushButton(self)
 	self.dropboxfolder_btn.setEnabled(False)
 	
+	self.cloudfolder_copy_btn = QPushButton(self)
+	self.cloudfolder_copy_btn.setEnabled(False)
 	
-	self.mlo.addWidget(self.allfiles_btn)
-	self.mlo.addWidget(self.media_btn)
-	self.mlo.addWidget(self.doc_btn)
-	self.mlo.addWidget(self.xls_btn)
-	self.mlo.addWidget(self.list_box)
-	self.mlo.addWidget(self.search_btn)
-	self.mlo.addWidget(self.file_label)
-	self.mlo.addWidget(self.dropboxfolder_btn)
+	self.search_toolbar = QToolBar(self)
+	self.toolbar = QToolBar(self)
+	
 	self.create_driver_radio_btns()
+	
+	self.toolbar.addWidget(self.allfiles_btn)
+	self.toolbar.addWidget(self.media_btn)
+	self.toolbar.addWidget(self.doc_btn)
+	self.toolbar.addWidget(self.xls_btn)
+	self.toolbar.addSeparator()
+
+	self.mlo.addWidget(self.search_toolbar)
+	self.mlo.addWidget(self.toolbar)
+	#~ self.mlo.addWidget(self.allfiles_btn)
+	#~ self.mlo.addWidget(self.media_btn)
+	#~ self.mlo.addWidget(self.doc_btn)
+	#~ self.mlo.addWidget(self.xls_btn)
+	self.mlo.addWidget(self.list_box)
+	self.mlo.addWidget(self.file_label)
+	self.toolbar.addWidget(self.dropboxfolder_btn)
+	self.toolbar.addWidget(self.cloudfolder_copy_btn)
+	
+	
 	
     def put_layout(self):
 	self.mlo = QVBoxLayout()
@@ -152,10 +175,11 @@ class MainTemplate(QWidget):
 		if not self.driver_gp.checkedButton():
 		    disk_btn.setChecked(True)
 		self.driver_gp.addButton(disk_btn)
-		self.mlo.addWidget(disk_btn)
+		self.search_toolbar.addWidget(disk_btn)
 	    else:
-		break   
-	
+		break
+	self.search_toolbar.addSeparator()
+	self.search_toolbar.addWidget(self.search_btn)
 class MainView(MainTemplate):
     def __init__(self):
 	MainTemplate.__init__(self)
@@ -169,6 +193,7 @@ class MainView(MainTemplate):
 	self.file_model.found.connect(self.found_files)
 	self.dropboxfolder_btn.setText('Move to ' + self.file_model.find_onedrive())
 	self.dropboxfolder_btn.clicked.connect(self.move_to_box)
+	self.cloudfolder_copy_btn.setText('Copy to ')
 	self.list_box.itemClicked.connect(lambda: self.dropboxfolder_btn.setEnabled(True))
 	self.thread = QThread()
 	self.file_model.moveToThread(self.thread)
@@ -234,6 +259,7 @@ class MainView(MainTemplate):
 	self.tfile_mover = ThreadFileMover([item.text() for item in self.selected_items])
 	self.tfile_mover.finished.connect(self.after_files_moved)
 	self.tfile_mover.one_moved.connect(self.after_single_file_moved)
+	self.tfile_mover.one_failed.connect(self.single_file_move_failed)
 	self.tfile_mover.start()
 	
 	
@@ -248,6 +274,11 @@ class MainView(MainTemplate):
 	self.dropboxfolder_btn.setEnabled(True)
 	self.dropboxfolder_btn.setText('Move to ' + self.file_model.find_onedrive())
 	self.search_btn.setEnabled(True)
+	
+    def single_file_move_failed(self, err):
+	msgbox = QMessageBox(self)
+	msgbox.setText(err.message)
+	msgbox.exec_()
 
 TESTING = False
 app = QApplication([])
