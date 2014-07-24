@@ -6,6 +6,24 @@ from PySide.QtCore import *
 from PySide.QtGui import *
 import os
 import re
+import shutil
+import time
+
+class ThreadFileMover(QThread):
+    finished = Signal()
+    one_moved = Signal()
+    def __init__(self, items):
+	QThread.__init__(self)
+	self.items = items
+	self.des = os.path.normpath(FoundFile.find_onedrive())
+
+    def run(self):
+	for item in self.items:
+	    print self.des
+	    shutil.move(item, self.des)
+	    self.one_moved.emit()
+	self.finished.emit()
+
 class FoundFile(QObject):
     found = Signal(list)
     visited = Signal(str)
@@ -66,17 +84,24 @@ class FoundFile(QObject):
 	    
     def long_find2(self, local_disk="c:\\"):
 	self.local_disk = local_disk
-	self.thread = QThread()
-	self.moveToThread(self.thread)
-	self.found.connect(self.thread.quit)
-	self.thread.started.connect(self.find2)
-	self.thread.start()
+	#~ self.thread = QThread()
+	#~ self.moveToThread(self.thread)
+	#~ self.found.connect(self.thread.quit)
+	#~ self.thread.started.connect(self.find2)
+	#~ self.thread.start()
+	
+    @staticmethod
+    def find_onedrive():
+	if TESTING:
+	    return "D:\\"
+	if os.path.expanduser("~\\SkyDrive"):
+	    return os.path.expanduser("~\\SkyDrive")
 		    
 class MainTemplate(QWidget):
     
     def __init__(self):
 	super(MainTemplate, self).__init__()
-	self.setFixedSize(640, 480)
+	self.setFixedSize(800, 600)
 	self.setWindowTitle('Important Files Finder')
 	self.put_layout()
 	self.allfiles_btn = QRadioButton('All', self)
@@ -93,7 +118,13 @@ class MainTemplate(QWidget):
 	self.set_radio_enabled(False)
 	self.search_btn = QPushButton('Search Files...', self)
 	self.list_box = QListWidget(self)
+	#~ self.list_box.setSelectionMode(QAbstractItemView.ExtendedSelection)
 	self.file_label = QLabel(self)
+	
+	self.dropboxfolder_btn = QPushButton(self)
+	self.dropboxfolder_btn.setEnabled(False)
+	
+	
 	self.mlo.addWidget(self.allfiles_btn)
 	self.mlo.addWidget(self.media_btn)
 	self.mlo.addWidget(self.doc_btn)
@@ -101,7 +132,7 @@ class MainTemplate(QWidget):
 	self.mlo.addWidget(self.list_box)
 	self.mlo.addWidget(self.search_btn)
 	self.mlo.addWidget(self.file_label)
-	
+	self.mlo.addWidget(self.dropboxfolder_btn)
 	self.create_driver_radio_btns()
 	
     def put_layout(self):
@@ -132,6 +163,17 @@ class MainView(MainTemplate):
 	self.list_box.itemDoubleClicked.connect(self.app_open)
 	#~ self.media_btn.clicked.connect(self.on_media_btn)
 	self.file_filter_gp.buttonClicked.connect(self.on_radio_btn)
+	
+	self.file_model = FoundFile()
+	self.file_model.visited.connect(self.file_label.setText)
+	self.file_model.found.connect(self.found_files)
+	self.dropboxfolder_btn.setText('Move to ' + self.file_model.find_onedrive())
+	self.dropboxfolder_btn.clicked.connect(self.move_to_box)
+	self.list_box.itemClicked.connect(lambda: self.dropboxfolder_btn.setEnabled(True))
+	self.thread = QThread()
+	self.file_model.moveToThread(self.thread)
+	self.file_model.found.connect(self.thread.quit)
+	self.thread.started.connect(self.file_model.find2)
     def change_btn_words(self):
 	pass
 	
@@ -146,16 +188,18 @@ class MainView(MainTemplate):
 	self.search_btn.setEnabled(False)
 	self.list_box.clear()
 	self.set_radio_enabled(False)
-	self.file_model = FoundFile()
-	self.file_model.visited.connect(self.file_label.setText)
-	self.file_model.found.connect(self.found_files)
-	self.file_model.long_find2(self.driver_gp.checkedButton().text())
-	  
+	self.dropboxfolder_btn.setEnabled(False)
+	if TESTING:
+	    self.file_model.long_find2("d:\\testpath pa")
+	else:
+	    self.file_model.long_find2(self.driver_gp.checkedButton().text())
+	
+	self.thread.start()  
     def found_files(self, file_names):
 	self.set_radio_enabled(True)
 	self.allfiles_btn.setChecked(True)
 	self.search_btn.setEnabled(True)
-	self.file_label.setText('')
+	self.file_label.setText('Total: %d'%len(self.file_model.file_r))
 	self.list_box.addItems(file_names)
 	  
     def app_open(self, item):
@@ -171,13 +215,41 @@ class MainView(MainTemplate):
     def on_radio_btn(self, btn_sender):
 	self.list_box.clear()
 	if btn_sender is self.media_btn:
-	    self.list_box.addItems(self.file_model.get_media_files())
+	    filtered_files = self.file_model.get_media_files()
 	elif btn_sender is self.doc_btn:
-	    self.list_box.addItems(self.file_model.get_doc_files())
+	    filtered_files = self.file_model.get_doc_files()
 	elif btn_sender is self.allfiles_btn:
-	    self.list_box.addItems(self.file_model.file_r)
+	    filtered_files = self.file_model.file_r
 	elif btn_sender is self.xls_btn:
-	    self.list_box.addItems(self.file_model.get_xls_files())
+	    filtered_files = self.file_model.get_xls_files()
+	self.list_box.addItems(filtered_files)
+	self.file_label.setText('Total: %d'%len(filtered_files))
+	
+    def move_to_box(self):
+	self.list_box.setEnabled(False)
+	self.dropboxfolder_btn.setEnabled(False)
+	self.dropboxfolder_btn.setText('Moving >>>')
+	self.search_btn.setEnabled(False)
+	self.selected_items = self.list_box.selectedItems()
+	self.tfile_mover = ThreadFileMover([item.text() for item in self.selected_items])
+	self.tfile_mover.finished.connect(self.after_files_moved)
+	self.tfile_mover.one_moved.connect(self.after_single_file_moved)
+	self.tfile_mover.start()
+	
+	
+    def after_single_file_moved(self):
+	item = self.selected_items.pop()
+	self.list_box.takeItem(self.list_box.row(item))
+	self.file_model.file_r.remove(item.text())
+	self.file_label.setText('Total: %d'%self.list_box.count())
+    
+    def after_files_moved(self):
+	self.list_box.setEnabled(True)
+	self.dropboxfolder_btn.setEnabled(True)
+	self.dropboxfolder_btn.setText('Move to ' + self.file_model.find_onedrive())
+	self.search_btn.setEnabled(True)
+
+TESTING = False
 app = QApplication([])
 app.setStyle('fusion')
 mt = MainView()
