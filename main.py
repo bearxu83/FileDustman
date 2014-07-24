@@ -15,15 +15,21 @@ class ThreadFileMover(QThread):
     finished = Signal()
     one_moved = Signal()
     one_failed = Signal(object)
-    def __init__(self, items):
+    
+    MOVE = 0
+    COPY = 1
+    def __init__(self, items, action):
 	QThread.__init__(self)
 	self.items = items
 	self.des = os.path.normpath(FoundFile.find_onedrive())
-
+	self.action = action
     def run(self):
 	for item in self.items:
 	    try:
-		shutil.move(item, self.des)
+		if self.action == self.MOVE:
+		    shutil.move(item, self.des)
+		elif self.action == self.COPY:
+		    shutil.copyfile(item, self.des)
 		self.one_moved.emit()
 	    except shutil.Error as e:
 		self.one_failed.emit(e)
@@ -193,8 +199,9 @@ class MainView(MainTemplate):
 	self.file_model.found.connect(self.found_files)
 	self.dropboxfolder_btn.setText('Move to ' + self.file_model.find_onedrive())
 	self.dropboxfolder_btn.clicked.connect(self.move_to_box)
-	self.cloudfolder_copy_btn.setText('Copy to ')
-	self.list_box.itemClicked.connect(lambda: self.dropboxfolder_btn.setEnabled(True))
+	self.cloudfolder_copy_btn.setText('Copy to ' + self.file_model.find_onedrive())
+	self.cloudfolder_copy_btn.clicked.connect(self.move_to_box)
+	self.list_box.itemClicked.connect(self.item_clicked)
 	self.thread = QThread()
 	self.file_model.moveToThread(self.thread)
 	self.file_model.found.connect(self.thread.quit)
@@ -214,12 +221,18 @@ class MainView(MainTemplate):
 	self.list_box.clear()
 	self.set_radio_enabled(False)
 	self.dropboxfolder_btn.setEnabled(False)
+	self.cloudfolder_copy_btn.setEnabled(False)
 	if TESTING:
 	    self.file_model.long_find2("d:\\testpath pa")
 	else:
 	    self.file_model.long_find2(self.driver_gp.checkedButton().text())
 	
-	self.thread.start()  
+	self.thread.start()
+	
+    def item_clicked(self):
+	self.dropboxfolder_btn.setEnabled(True)
+	self.cloudfolder_copy_btn.setEnabled(True)
+	
     def found_files(self, file_names):
 	self.set_radio_enabled(True)
 	self.allfiles_btn.setChecked(True)
@@ -253,10 +266,17 @@ class MainView(MainTemplate):
     def move_to_box(self):
 	self.list_box.setEnabled(False)
 	self.dropboxfolder_btn.setEnabled(False)
-	self.dropboxfolder_btn.setText('Moving >>>')
+	self.cloudfolder_copy_btn.setEnabled(False)
+	self.sender().setText('Processing >>>')
 	self.search_btn.setEnabled(False)
 	self.selected_items = self.list_box.selectedItems()
-	self.tfile_mover = ThreadFileMover([item.text() for item in self.selected_items])
+	if self.sender() is self.cloudfolder_copy_btn:
+	    action = ThreadFileMover.MOVE
+	elif self.sender() is self.dropboxfolder_btn:
+	    action = ThreadFileMover.COPY
+	else:
+	    raise Error("this func is a slot.wrongly used or signal changed")
+	self.tfile_mover = ThreadFileMover([item.text() for item in self.selected_items], action)
 	self.tfile_mover.finished.connect(self.after_files_moved)
 	self.tfile_mover.one_moved.connect(self.after_single_file_moved)
 	self.tfile_mover.one_failed.connect(self.single_file_move_failed)
@@ -273,6 +293,8 @@ class MainView(MainTemplate):
 	self.list_box.setEnabled(True)
 	self.dropboxfolder_btn.setEnabled(True)
 	self.dropboxfolder_btn.setText('Move to ' + self.file_model.find_onedrive())
+	self.cloudfolder_copy_btn.setEnabled(True)
+	self.cloudfolder_copy_btn.setText('Copy to ' + self.file_model.find_onedrive())
 	self.search_btn.setEnabled(True)
 	
     def single_file_move_failed(self, err):
