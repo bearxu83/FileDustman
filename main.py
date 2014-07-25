@@ -12,8 +12,7 @@ import shutil
 import time
 
 class ThreadFileMover(QThread):
-    finished = Signal()
-    one_moved = Signal()
+    one_moved = Signal(int)
     one_failed = Signal(object)
     
     MOVE = 0
@@ -32,11 +31,10 @@ class ThreadFileMover(QThread):
 		    if os.path.exists(os.path.join(self.des, os.path.basename(item))):
 			raise shutil.Error(os.path.join(self.des, os.path.basename(item)) + ' already exists')
 		    shutil.copy(item, self.des)
-		self.one_moved.emit()
+		self.one_moved.emit(self.action)
 	    except shutil.Error as e:
 		self.one_failed.emit(e)
-	self.finished.emit()
-
+		
 class FoundFile(QObject):
     found = Signal(list)
     visited = Signal(str)
@@ -46,7 +44,7 @@ class FoundFile(QObject):
     
     def get_media_files(self):
 	if self.file_r:
-	    return [f for f in self.file_r if re.findall(r'[.](mp4|rmvb|avi|mkv)$', f)]
+	    return [f for f in self.file_r if re.findall(r'[.](mp4|rmvb|avi|mkv|wmv|wma|mp3)$', f)]
     
     def get_doc_files(self):
 	if self.file_r:
@@ -81,7 +79,7 @@ class FoundFile(QObject):
 	self.file_r = []
 	key_files = set(['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'])
 	key_files = set(['avi', 'rmvb', 'mp4', 'mkv']) | key_files
-	minor_name_pattern = re.compile(r'[.](pdf|doc|docx|ppt|pptx|mp4|avi|rmvb|mkv|xls|xls)$')
+	minor_name_pattern = re.compile(r'[.](pdf|doc|docx|ppt|pptx|mp4|avi|rmvb|mkv|wmv|mp3|wma|xls|xls)$')
 	for root, directories, files in os.walk(self.local_disk):
 	    if ':\\Windows' in root:
 		break
@@ -272,6 +270,7 @@ class MainView(MainTemplate):
 	self.dropboxfolder_btn.setEnabled(False)
 	self.cloudfolder_copy_btn.setEnabled(False)
 	btn_sender.setText('Processing >>>')
+	self.last_clicked_btn_id = self.file_operation_gp.id(btn_sender)
 	self.search_btn.setEnabled(False)
 	self.selected_items = self.list_box.selectedItems()
 	self.tfile_mover = ThreadFileMover([item.text() for item in self.selected_items], self.file_operation_gp.id(btn_sender))
@@ -280,11 +279,14 @@ class MainView(MainTemplate):
 	self.tfile_mover.one_failed.connect(self.single_file_move_failed)
 	self.tfile_mover.start()
 	
-	
-    def after_single_file_moved(self):
+    @Slot(int)
+    def after_single_file_moved(self, action_id):
 	item = self.selected_items.pop()
-	self.list_box.takeItem(self.list_box.row(item))
-	self.file_model.file_r.remove(item.text())
+	if action_id == ThreadFileMover.MOVE:
+	    self.list_box.takeItem(self.list_box.row(item))
+	    self.file_model.file_r.remove(item.text())
+	elif action_id == ThreadFileMover.COPY:
+	    item.setForeground(QBrush(QColor(255, 0, 0)))
 	self.file_label.setText('Total: %d'%self.list_box.count())
     
     def after_files_moved(self):
