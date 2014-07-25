@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #bug: Repeated File
-#feature: Add Copy To, Successful Tip, Debug Sys
+#feature: QListViewModel-> WholeModel PartView, Successful Tip, Debug Sys
 #study: Command Pattern. ThreadWorker Pattern
 from __future__ import unicode_literals
 from PySide.QtCore import *
@@ -29,7 +29,9 @@ class ThreadFileMover(QThread):
 		if self.action == self.MOVE:
 		    shutil.move(item, self.des)
 		elif self.action == self.COPY:
-		    shutil.copyfile(item, self.des)
+		    if os.path.exists(os.path.join(self.des, os.path.basename(item))):
+			raise shutil.Error(os.path.join(self.des, os.path.basename(item)) + ' already exists')
+		    shutil.copy(item, self.des)
 		self.one_moved.emit()
 	    except shutil.Error as e:
 		self.one_failed.emit(e)
@@ -139,7 +141,7 @@ class MainTemplate(QWidget):
 	
 	self.cloudfolder_copy_btn = QPushButton(self)
 	self.cloudfolder_copy_btn.setEnabled(False)
-	
+	self.file_operation_gp = QButtonGroup()
 	self.search_toolbar = QToolBar(self)
 	self.toolbar = QToolBar(self)
 	
@@ -192,15 +194,17 @@ class MainView(MainTemplate):
 	self.search_btn.clicked.connect(self.search_files)
 	self.list_box.itemDoubleClicked.connect(self.app_open)
 	#~ self.media_btn.clicked.connect(self.on_media_btn)
-	self.file_filter_gp.buttonClicked.connect(self.on_radio_btn)
+	self.file_operation_gp.addButton(self.dropboxfolder_btn, ThreadFileMover.MOVE)
+	self.file_operation_gp.addButton(self.cloudfolder_copy_btn, ThreadFileMover.COPY)
+	self.file_operation_gp.buttonClicked.connect(self.move_to_box)
 	
+	self.file_filter_gp.buttonClicked.connect(self.on_radio_btn)
 	self.file_model = FoundFile()
 	self.file_model.visited.connect(self.file_label.setText)
 	self.file_model.found.connect(self.found_files)
 	self.dropboxfolder_btn.setText('Move to ' + self.file_model.find_onedrive())
-	self.dropboxfolder_btn.clicked.connect(self.move_to_box)
 	self.cloudfolder_copy_btn.setText('Copy to ' + self.file_model.find_onedrive())
-	self.cloudfolder_copy_btn.clicked.connect(self.move_to_box)
+	
 	self.list_box.itemClicked.connect(self.item_clicked)
 	self.thread = QThread()
 	self.file_model.moveToThread(self.thread)
@@ -263,20 +267,14 @@ class MainView(MainTemplate):
 	self.list_box.addItems(filtered_files)
 	self.file_label.setText('Total: %d'%len(filtered_files))
 	
-    def move_to_box(self):
+    def move_to_box(self, btn_sender):
 	self.list_box.setEnabled(False)
 	self.dropboxfolder_btn.setEnabled(False)
 	self.cloudfolder_copy_btn.setEnabled(False)
-	self.sender().setText('Processing >>>')
+	btn_sender.setText('Processing >>>')
 	self.search_btn.setEnabled(False)
 	self.selected_items = self.list_box.selectedItems()
-	if self.sender() is self.cloudfolder_copy_btn:
-	    action = ThreadFileMover.MOVE
-	elif self.sender() is self.dropboxfolder_btn:
-	    action = ThreadFileMover.COPY
-	else:
-	    raise Error("this func is a slot.wrongly used or signal changed")
-	self.tfile_mover = ThreadFileMover([item.text() for item in self.selected_items], action)
+	self.tfile_mover = ThreadFileMover([item.text() for item in self.selected_items], self.file_operation_gp.id(btn_sender))
 	self.tfile_mover.finished.connect(self.after_files_moved)
 	self.tfile_mover.one_moved.connect(self.after_single_file_moved)
 	self.tfile_mover.one_failed.connect(self.single_file_move_failed)
